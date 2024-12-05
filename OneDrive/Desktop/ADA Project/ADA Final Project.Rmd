@@ -1,0 +1,724 @@
+---
+title: "ADA Final Project"
+author: "Samia Hadji"
+date: "2024-11-07"
+output: html_document
+---
+
+
+# installing and loading packages
+```{r}
+pacman::p_load(tidyverse, readr, table1, DiagrammeR, rsvg, ggplot2, tidyverse,haven, dplyr, magrittr, knitr, GGally, survival, ggfortify, survminer, lmtest, foreign, nnet, broom, MASS)
+# tidyverse is for data management
+# readr is for reading in the csv file
+# DiagrammeR is for generating Figure 1
+# table1 is for generating table 1
+# rsvg for exporting figure 1
+```
+
+
+
+# 1. Importing Dataset
+```{r}
+# read dataset imported from SEER
+ Project_rawdata <- read.csv("C:/Users/samia/OneDrive/Desktop/ADA Project/SEER ADA Project FINAL FINAL DATASET.txt", header=TRUE)
+ 
+  #colnames(Project_rawdata) <- as.character(Project_rawdata[1, ])
+  View(Project_rawdata)
+```
+
+# 2.2. Determine: **a.** the number of observations and **b.** the number of variables in the dataframe.Number of Female and Male cases
+```{r}
+# a and b determine number of observations and variables in raw dataset
+dim(Project_rawdata)
+# there are 588263 observations and 7 variables
+str(Project_rawdata)
+table(Project_rawdata$Sex) # 4281 Male cases will be excluded
+Project_rawdata$Sex
+
+```
+
+# 3. **a.** Rename the column variables to something shorter and that is descriptive of what the variable is about and **b.** Display that they are renamed.
+```{r}
+# use names function to rename the 27 variables in order
+names(Project_rawdata)[1:7]<-c("Sex", "Age", "Race_Ethnicity", "Combined_Summary_Stage", "Death_Class", "Survival_Months", "Income_range")
+# b. display the renamed variables
+colnames(Project_rawdata)
+```
+#4. Determine and display the number of factor, integer, numerical, and character variables there are in the dataset.
+```{r}
+table(sapply(Project_rawdata, class)) # Using table and sapply functions
+summary(Project_rawdata)
+```
+# 5. Conducting further data management
+```{r}
+
+# Recode Survival_Months as numeric
+
+# a. look at values for Survival_Months
+Project_rawdata$Survival_Months
+
+# b.convert to numeric for statistics
+Project_rawdata$Survival_Months<-as.numeric(Project_rawdata$Survival_Months)
+Project_rawdata$Survival_Months # check values 
+
+
+Project_rawdata
+
+
+```
+
+6. Recode race Ethnicity as factor variables, replace the ranking with White as reference group(0), recode Non-Hispanic Unknown Race as Missing
+
+```{r}
+table(Project_rawdata$Race_Ethnicity)
+Project_rawdata <- Project_rawdata %>%
+  mutate(Race_Ethnicity = case_when(Race_Ethnicity == "Non-Hispanic White" ~ 0,
+                          Race_Ethnicity == "Non-Hispanic Black" ~ 1,
+                          Race_Ethnicity == "Non-Hispanic American Indian/Alaska Native" ~ 2,
+                          Race_Ethnicity == "Non-Hispanic Asian or Pacific Islander" ~ 3,
+                          Race_Ethnicity == "Hispanic (All Races)" ~ 4,
+                          Race_Ethnicity == "Non-Hispanic Unknown Race" ~ NA))
+
+Project_rawdata$Race_Ethnicity <- factor(Project_rawdata$Race_Ethnicity, levels = c(0:4), labels = c("Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic American Indian/Alaska Native", "Non-Hispanic Asian or Pacific Islander", "Hispanic (All Races)"))
+table(Project_rawdata$Race_Ethnicity,useNA = "always")
+
+
+```
+
+
+```{r}
+
+# create a new variable using Income recoded into categories, create new variable using Age recoded into fewer groups,Create a new variable using Death_Classification recoded into 0 and 1(for the purpose of Survival analysis that will be conducted), and recode missing/uknown/unstaged into NA
+
+Project_data <- Project_rawdata %>%
+  mutate(Income_category = ifelse(`Income_range` == "< $40,000", "Lower income", 
+                                  ifelse(`Income_range` %in% c("$90,000 - $94,999", "$95,000 - $99,999", "$100,000 - $109,999", "$110,000 - $119,999", "$120,000+"), "Upper income", 
+                                         ifelse(`Income_range` == "Unknown/missing/no match/Not 1990-2022", NA, "Middle income")))) %>%
+  mutate(Age_group = ifelse(Age %in% c("15-19 years", "01-04 years", "10-14 years", "05-09 years", "00 years"), "<20",
+                            ifelse(Age %in% c("25-29 years", "20-24 years"), "20-29",
+                                   ifelse(Age %in% c("35-39 years", "30-34 years"), "30-39",
+                                          ifelse(Age %in% c("45-49 years", "40-44 years"), "40-49",
+                                                 ifelse(Age %in% c("55-59 years", "50-54 years"), "50-59",
+                                                        ifelse(Age %in% c("60-64 years", "65-69 years"), "60-69",
+                                                               ifelse(Age %in% c("75-79 years", "70-74 years"), "70-79", ">80")))))))) %>%
+  mutate(Death_Classified = ifelse(Death_Class == "Alive or dead of other cause", 0,
+                              ifelse(Death_Class == "Dead (attributable to this cancer dx)", 1, NA)))
+
+
+
+# replace missing/unknown/unstaged values with NAs
+Project_data <- Project_data %>%
+ mutate(Combined_Summary_Stage = ifelse(Combined_Summary_Stage %in% c("Unknown/unstaged", "In situ"), NA, Combined_Summary_Stage)) %>%
+  mutate(Death_Class = ifelse(Death_Class %in% c("Dead (missing/unknown COD)"), NA, Death_Class)) %>%
+  mutate(Death_Classified = ifelse(Death_Classified %in% c("Dead (missing/unknown COD)"), NA, Death_Classified))
+
+
+
+# Check variables for correct categorization 
+table(Project_data$'Income_range', Project_data$Income_category, useNA = "always")
+table(Project_data$Death_Class, Project_data$Death_Classified, useNA = "always")
+table(Project_data$Age, Project_data$Age_group, useNA = "always")
+table(Project_data$Combined_Summary_Stage, useNA = "always")
+
+```
+
+
+
+# Figure 1a; drop na one variable at the time, flow chart
+- Let's next make a figure 1 that shows exclusions to arrive at your analytic data set. 
+- We can do this with a package called DiagrammeR and the function grViz.
+
+
+# First we will make the following exclusions one at a time
+- Exclusion 1: exclude Male cases
+```{r}
+Project_data1 <- Project_data %>%
+  filter(Sex == "Female") 
+
+ex1 <- nrow(Project_data)- nrow(Project_data1)
+ex1
+```
+- Exclusion 2 those missing data on Race_Ethnicity
+```{r}
+table(Project_data2$Race_Ethnicity, useNA = "always")
+
+Project_data2 <- Project_data1 %>%
+  drop_na(Race_Ethnicity)
+
+
+
+ex2 <- nrow(Project_data1) - nrow(Project_data2)
+ex2
+```
+
+
+- Exclusion 3 those with missing data on Income_category
+```{r}
+Project_data3 <- Project_data2 %>%
+  drop_na(Income_category) 
+
+ex3 <- nrow(Project_data2) - nrow(Project_data3)
+ex3
+```
+- Exclusion 4 those with missing data on Death_Classified
+
+
+```{r}
+Project_data4 <- Project_data3 %>%
+  drop_na(Death_Classified) 
+
+ex4 <- nrow(Project_data3) - nrow(Project_data4) 
+ex4
+```
+
+
+
+- Exclusion 5 those with missing data on Combined_Summary_Stage
+```{r}
+Project_data5 <- Project_data4 %>%
+  drop_na(Combined_Summary_Stage) 
+
+ex5 <- nrow(Project_data4) - nrow(Project_data5) 
+ex5
+```
+
+
+- Exclusion 6 those with missing data on Survival_Months
+
+```{r}
+Project_data6 <- Project_data5 %>%
+  drop_na(Survival_Months) 
+
+ex6 <- nrow(Project_data5) - nrow(Project_data6) 
+ex6
+
+```
+# Exclusion 7 # let's make another dataframe for the prpose of conducting Survival analysis that excludes Male cases, with missing data on Income_Category, with missing data on Death Classified, and with missing data on survival time (survmo) only, without excluding missing on Combined Stage Summary. Figure 2b with branching will be generated
+
+```{r}
+Project_data7 <- Project_data4 %>%
+  drop_na(Survival_Months) 
+
+ex7 <- nrow(Project_data4) - nrow(Project_data7) 
+ex7
+```
+# Let's use the grViz function from the DiagrammeR package to make a flow chart of how we arrived at our analytic dataframe
+
+```{r}
+figure1a <- grViz(diagram = "digraph flowchart{ # gives beginning of flowchart
+
+      # node definitions with substituted label text
+      
+      node [fontname = Helvetica, shape = rectangle, fontsize=10] 
+      
+      # Define the nodes: nodes indicate how many boxes you will have in your diagram. Since I have three sets of exclusions, I will have four nodes.
+      
+      node1 [label = '@@1'] # starting number
+      node2 [label = '@@2'] # number after exclusion 1
+      node3 [label = '@@3'] # number after exclusion 2
+      node4 [label = '@@4'] # number after exclusion 3
+      node5 [label = '@@5'] # number after exclusion 4
+      node6 [label = '@@6'] # number after exclusion 5
+      node7 [label = '@@7'] # number after exclusion 6
+      
+      
+      # edge definitions with the node IDs are used to indicate how the rectangle boxes flow from each other. 
+      
+      node1 -> node2 -> node3 -> node4 -> node5 -> node6 -> node7
+      
+      
+}
+      # This set of code provides the text in each rectangle box.
+      [1]: 'Records received from SEER for Breast cancer diagnoses n = 588263'
+      [2]: 'Excluding 4281 Male 2007 n = 583,982'
+      [3]: 'Excluding 4283 individuals with missing data on \\n Race Ehnicity n = 579,699'
+      [4]: 'Excluding 59 individuals with missing data on \\n Income category n = 579,640'
+      [5]: 'Excluding 1517 individuals with missing data on \\n Death classification n = 578,123'
+      [6]: 'Excluding 11537 individuals with missing data on \\n Combined Summary Stage n = 566,586'
+      [7]: 'Excluding 52 individuals with missing data on \\n Survival Months n = 566,534'
+      ")
+figure1a
+
+```
+
+# Suppose we also conduct an analysis on survival where we don't need to exclude those with missing Combined Summary Stage at diagnosis: 
+- we can use branching to do this
+```{r}
+# note in this function all text is green but you can still comment out text with hashtags
+# for more information on grViz that uses the "DOT" language, see: https://rich-iannone.github.io/DiagrammeR/articles/graphviz-mermaid.html
+
+figure1b <- grViz(diagram = "digraph flowchart{ # gives beginning of flowchart
+
+      # node definitions with substituted label text
+      
+      node [fontname = Helvetica, shape = rectangle, fontsize=10] 
+      
+      # Define the nodes: nodes indicate how many boxes you will have in your diagram. Since I have three sets of exclusions, I will have four nodes.
+      
+      node1 [label = '@@1'] # starting number
+      node2 [label = '@@2'] # number after exclusion 1
+      node3 [label = '@@3'] # number after exclusion 2
+      node4 [label = '@@4'] # number after exclusion 3
+      node5 [label = '@@5'] # number after exclusion 4
+      node6 [label = '@@6'] # number after exclusion 5
+      node7 [label = '@@7'] # number after exclusion 6
+      
+      # edge definitions with the node IDs are used to indicate how the rectangle boxes flow from each other. 
+      
+      node1 -> node2 -> node3 -> node4 -> node5
+      node5 -> node6 # branching
+      node5 -> node7 # branching
+      
+}
+
+      # This set of code provides the text in each rectangle box.
+      [1]: 'Records received from SEER for Breast cancer diagnoses n = 588263'
+      [2]: 'Excluding 4281 Male 2007 n = 583,982'
+      [3]: 'Excluding 4283 individuals with missing data on Race Ethnicity n = 579,699'
+      [4]: 'Excluding 59 individuals with missing data on \\n Income Category n = 579,640'
+      [5]: 'Excluding 1517 individuals with missing data on \\n Death Classification n = 578,123'
+      [6]: 'Excluding 11537 individuals with missing data on \\n Combined Summary Stage n = 566,586'
+      [7]: 'Excluding 2706 individuals with missing data on \\n Survival Months n = 575,417'
+      ")
+figure1b
+```
+# export figure
+
+```{r}
+figure1a %>%
+  DiagrammeRsvg::export_svg() %>% 
+  charToRaw() %>% 
+  rsvg::rsvg_pdf("Figure 1.pdf")
+```
+
+# Table 1
+
+```{r}
+#Drop missing on Death class.........
+Project_data_clean <- Project_data6 %>%
+  drop_na(Death_Class)
+
+# Adding labels to the variables because the raw variables are not publication-quality. This is important in producing a high-quality table.
+label(Project_data_clean$Age_group)<-"Age group"
+label(Project_data_clean$Race_Ethnicity)<-"Race Ethnicity"
+label(Project_data_clean$Income_category)<-"Income Category"
+label(Project_data_clean$Combined_Summary_Stage)<-"Combined Stage Summary"
+label(Project_data_clean$Death_Class)<-"Death Classification"
+label(Project_data_clean$Survival_Months)<-"Survival time (months)"
+
+
+
+
+# Generate Table 1
+tbl1 <- table1(~ Age_group + Race_Ethnicity + Income_category + Combined_Summary_Stage + Death_Class + Survival_Months,overall="Total", footnote='SD = standard deviation', rowlabelhead="Variable", data = Project_data_clean)
+tbl1
+```
+# Stratified table 1 by Race Ethnicity
+```{r}
+#Generate Table1 stratified results by race ethnicity status
+
+table1(~ Age_group + Income_category + Combined_Summary_Stage  + Death_Class + Survival_Months|Race_Ethnicity, overall="Total", footnote='SD = standard deviation', 
+       rowlabelhead="Variable", Project_data_clean)
+```
+
+
+
+# Figure 2
+
+```{r}
+
+ggp <- Project_data_clean %>%
+  ggplot(aes(x = Race_Ethnicity, y = after_stat(prop), fill = Combined_Summary_Stage, by = Race_Ethnicity)) +
+  geom_bar(position = position_dodge(), stat = "prop") +
+  geom_text(aes(label = paste0(round(100 * after_stat(prop), 1), "%")),
+    position = position_dodge(.9), stat = "prop", vjust = -.2
+  ) +
+  labs(x = "Race Ethnicity Groups", y = "Proportion", title = "Combined Summary Stage by Race Ethnicity (n = 657; 
+       SEER, 2011-2021)",
+       fill = "Combined Summary Stage")
+ggp + scale_x_discrete(guide=guide_axis(angle=45),labels = function(x) str_wrap(x, width = 10))
+
+
+
+
+```
+
+
+
+#Kaplan Meier
+
+
+```{r}
+#overall
+# overall
+overall <- survfit(Surv(Survival_Months, Death_Classified) ~ 1, Project_data6) 
+# get survival probabilities
+summary(overall)
+ 
+# Race
+KM_Race <- survfit(Surv(Survival_Months, Death_Classified ) ~ Race_Ethnicity, Project_data6)
+summary(KM_Race)
+# Income
+KM_Income <- survfit(Surv(Survival_Months, Death_Classified) ~ Income_category, Project_data6)
+summary(KM_Income)
+```
+
+# Survival probabilities
+
+```{r}
+#ggsurvplot Overall
+summary(overall)
+ggsurvplot(overall, Project_data6 = Project_data6, conf.int=TRUE, pval = TRUE,  tables.theme = clean_theme())
+#ggsurvplot Race Ethnicity
+ggsurvplot(KM_Race, Project_data6, Conf.int= TRUE, pval = TRUE,
+             legend = c(0.5, 0.5),  # Adjust legend position (optional, in x/y proportions)
+  legend.title = "Race Ethnicity") # Customize legend title
+#ggsurvplot Income Category
+ggsurvplot(KM_Income, Project_data6, Conf.int= TRUE, pval = TRUE,
+             legend = c(0.5, 0.5),  # Adjust legend position (optional, in x/y proportions)
+  legend.title = "Income_category") # Customize legend title
+
+  
+```
+
+# 9. Get median survival time overall, by sex, and by race (note if the results are unexpected, think about why)
+
+```{r}
+overall
+KM_Race
+KM_Income
+```
+
+# 10. Calculate exact log rank in R for the difference in survival curves between Race Ethnicity subroups, Income categories
+
+```{r}
+# Race
+survdiff(Surv(Survival_Months, Death_Classified) ~ Race_Ethnicity, data=Project_data6)
+
+# Income
+survdiff(Surv(Survival_Months, Death_Classified) ~ Income_category, data=Project_data6)
+```
+
+
+
+```{r}
+#Conduct pairwise differences test for race that has more than two categories.
+pairwise_survdiff(Surv(Survival_Months, Death_Classified) ~ Race_Ethnicity, data=Project_data6) # post-hoc test
+```
+
+```{r}
+#Conduct pairwise differences test for Income that has more than two categories.
+pairwise_survdiff(Surv(Survival_Months, Death_Classified) ~ Income_category, data=Project_data6) # post-hoc test
+```
+
+
+## adjust for Income_category
+## Stratified log rank test
+- The observed minus expected scores are calculated within strata of each group and then summed across strata (see excel sheet 4 for intuition).
+- The stratified log rank test allows for testing of whether survival curves differ controlling for the stratified variable
+- Let's control for Income category using the strata function
+
+```{r}
+survdiff(Surv(Survival_Months, Death_Classified) ~ Race_Ethnicity + strata(Income_category), data=Project_data6) # adjusted log-rank
+```
+# Cox propor
+
+```{r}
+## Which group has a higher hazard of Death by Breast cancer (within race and ethnicity groups)? Run univariate Cox model to examine the association between race and ethnicity group and death by breast cancer. Interpret the results.
+
+race.model <- coxph(Surv(Survival_Months, Death_Classified)~Race_Ethnicity, Project_data6, ties="efron") 
+summary(race.model)
+
+# Interpretation: Those who are of such race ethnicity  had a ..... (95% CI ....-.....) times higher hazard of death by breast cancer than those of .....race ethnicity.
+
+```
+
+# Adjust the Cox model for Income, combined Summary Stage, and age 
+
+```{r}
+race_adj.model<-coxph(Surv(Survival_Months, Death_Classified) ~ Race_Ethnicity + Income_category + Age_group + Combined_Summary_Stage , Project_data6)
+summary(race_adj.model)
+```
+
+ ## Compare nested models using the likelihood ratio test (a measure of model fit) and interpret the findings
+ 
+```{r}
+lrtest(race.model, race_adj.model)
+```
+ #Include an interaction term in the model between Race Ethnicity and Income categories to see if there is effect modification of the hazard of dying of breast cancer in those among the different race and ethnicity groups according to their Income category
+ 
+```{r}
+race_int.model1<-coxph(Surv(Survival_Months, Death_Classified)~Race_Ethnicity  + Income_category + Income_category*Race_Ethnicity, Project_data6)
+summary(race_int.model1)
+library(broom)
+# Set scipen to a high value to avoid scientific notation
+options(scipen = 999)
+data <- as.data.frame(tidy(race_int.model1, exponentiate = TRUE, conf.int = TRUE))
+```
+Call:
+coxph(formula = Surv(Survival_Months, Death_Classified) ~ Race_Ethnicity + 
+    Income_category + Income_category * Race_Ethnicity, data = Project_data6)
+
+  n= 566534, number of events= 51302 
+
+                                                                                           coef
+Race_EthnicityNon-Hispanic Black                                                       0.352242
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                              -0.181430
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                  -0.031904
+Race_EthnicityHispanic (All Races)                                                     0.116287
+Income_categoryMiddle income                                                          -0.358654
+Income_categoryUpper income                                                           -0.574080
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                          0.199013
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income  0.248328
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income     -0.117063
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                        0.005573
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                           0.226837
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income   0.507322
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income      -0.156287
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                        -0.050659
+                                                                                      exp(coef)
+Race_EthnicityNon-Hispanic Black                                                       1.422253
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                               0.834077
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                   0.968600
+Race_EthnicityHispanic (All Races)                                                     1.123318
+Income_categoryMiddle income                                                           0.698616
+Income_categoryUpper income                                                            0.563223
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                          1.220198
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income  1.281881
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income      0.889529
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                        1.005589
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                           1.254625
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income   1.660837
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income       0.855313
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                         0.950602
+                                                                                       se(coef)
+Race_EthnicityNon-Hispanic Black                                                       0.071797
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                               0.238615
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                   0.578546
+Race_EthnicityHispanic (All Races)                                                     0.143569
+Income_categoryMiddle income                                                           0.037745
+Income_categoryUpper income                                                            0.038793
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                          0.073046
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income  0.247246
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income      0.579029
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                        0.144386
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                           0.078196
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income   0.265319
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income       0.579128
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                         0.146485
+                                                                                            z
+Race_EthnicityNon-Hispanic Black                                                        4.906
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                               -0.760
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                   -0.055
+Race_EthnicityHispanic (All Races)                                                      0.810
+Income_categoryMiddle income                                                           -9.502
+Income_categoryUpper income                                                           -14.798
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                           2.724
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income   1.004
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income      -0.202
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                         0.039
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                            2.901
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income    1.912
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income       -0.270
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                         -0.346
+                                                                                                  Pr(>|z|)
+Race_EthnicityNon-Hispanic Black                                                               0.000000929
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                                           0.44705
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                               0.95602
+Race_EthnicityHispanic (All Races)                                                                 0.41795
+Income_categoryMiddle income                                                          < 0.0000000000000002
+Income_categoryUpper income                                                           < 0.0000000000000002
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                                      0.00644
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income              0.31520
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income                  0.83978
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                                    0.96921
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                                       0.00372
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income               0.05586
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income                   0.78726
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                                     0.72947
+                                                                                         
+Race_EthnicityNon-Hispanic Black                                                      ***
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                                 
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                     
+Race_EthnicityHispanic (All Races)                                                       
+Income_categoryMiddle income                                                          ***
+Income_categoryUpper income                                                           ***
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                         ** 
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income    
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income        
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                          
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                          ** 
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income  .  
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income         
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                           
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+                                                                                      exp(coef)
+Race_EthnicityNon-Hispanic Black                                                         1.4223
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                                 0.8341
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                     0.9686
+Race_EthnicityHispanic (All Races)                                                       1.1233
+Income_categoryMiddle income                                                             0.6986
+Income_categoryUpper income                                                              0.5632
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                            1.2202
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income    1.2819
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income        0.8895
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                          1.0056
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                             1.2546
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income     1.6608
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income         0.8553
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                           0.9506
+                                                                                      exp(-coef)
+Race_EthnicityNon-Hispanic Black                                                          0.7031
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                                  1.1989
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                      1.0324
+Race_EthnicityHispanic (All Races)                                                        0.8902
+Income_categoryMiddle income                                                              1.4314
+Income_categoryUpper income                                                               1.7755
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                             0.8195
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income     0.7801
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income         1.1242
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                           0.9944
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                              0.7971
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income      0.6021
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income          1.1692
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                            1.0520
+                                                                                      lower .95
+Race_EthnicityNon-Hispanic Black                                                         1.2356
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                                 0.5225
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                     0.3117
+Race_EthnicityHispanic (All Races)                                                       0.8478
+Income_categoryMiddle income                                                             0.6488
+Income_categoryUpper income                                                              0.5220
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                            1.0574
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income    0.7896
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income        0.2859
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                          0.7577
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                             1.0764
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income     0.9874
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income         0.2749
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                           0.7134
+                                                                                      upper .95
+Race_EthnicityNon-Hispanic Black                                                         1.6372
+Race_EthnicityNon-Hispanic American Indian/Alaska Native                                 1.3314
+Race_EthnicityNon-Hispanic Asian or Pacific Islander                                     3.0103
+Race_EthnicityHispanic (All Races)                                                       1.4884
+Income_categoryMiddle income                                                             0.7523
+Income_categoryUpper income                                                              0.6077
+Race_EthnicityNon-Hispanic Black:Income_categoryMiddle income                            1.4080
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryMiddle income    2.0812
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryMiddle income        2.7671
+Race_EthnicityHispanic (All Races):Income_categoryMiddle income                          1.3345
+Race_EthnicityNon-Hispanic Black:Income_categoryUpper income                             1.4624
+Race_EthnicityNon-Hispanic American Indian/Alaska Native:Income_categoryUpper income     2.7936
+Race_EthnicityNon-Hispanic Asian or Pacific Islander:Income_categoryUpper income         2.6612
+Race_EthnicityHispanic (All Races):Income_categoryUpper income                           1.2667
+
+Concordance= 0.564  (se = 0.001 )
+Likelihood ratio test= 3074  on 14 df,   p=<0.0000000000000002
+Wald test            = 3302  on 14 df,   p=<0.0000000000000002
+Score (logrank) test = 3412  on 14 df,   p=<0.0000000000000002
+
+ 
+```{r}
+lrtest(race_adj.model, race_int.model1)
+```
+ 
+ # check for influential observations: assess whether any observations are exerting influence on the coefficient estimates.
+ 
+ 
+```{r}
+ggcoxdiagnostics(race_int.model1, type = "dfbeta", sline=FALSE, ggtheme = theme_bw()) 
+# the pattern should not change the beta by a large degree. Here the betas change by a factor of less than +/-0.2 for all covariates
+```
+ 
+ 
+
+ 
+ #Testing the PH assumption
+ ## 1. Log-log curves: log(-log(survival)) against log(time)
+ 
+```{r}
+Project_data.surv <- survfit(Surv(Project_data6$Survival_Months, Project_data6$Death_Classified) ~ Race_Ethnicity, Project_data6) # get survival probabilities
+summary(Project_data.surv)
+
+plot(Project_data.surv , col=c("black", "red"), main= "rx log log plot", fun="cloglog", xlab="Time", ylab="log(-log(S(t))") ##ph assumption not violated........
+```
+
+# 2. Schoenfeld goodness-of-fit test 
+
+
+```{r}
+test.ph<-cox.zph(race_adj.model, terms=FALSE) 
+test.ph
+```
+
+# 3. Schoenfeld residuals plots
+
+
+```{r}
+
+plot(test.ph, resid=FALSE)
+
+#  Here is yet another way to do the Schoenfeld residual plots by time, showing the p-values from the Schoenfeld Test for each covariate
+ggcoxzph(test.ph)
+```
+
+
+# Running Multinominal Logistic Regression: Race Ehnicity vs Combined Stage Summary
+## recode variables for analysis
+
+```{r}
+# Combined_Stage_Summary - change it to numeric, set Localized as reference
+Project_data6 <- Project_data6 %>%
+  mutate(Combined_Summary_Stage_new = case_when(Combined_Summary_Stage=="Localized" ~ 0,
+                              Combined_Summary_Stage=="Regional" ~ 1,
+                              Combined_Summary_Stage=="Distant" ~ 2)) 
+Project_data6$Combined_Summary_Stage_new <- factor(Project_data6$Combined_Summary_Stage_new,
+                                                   levels = c(0:2), labels = c("Localized", "Regional", "Distant")) # make it a factor and give factor labels for different  combined summary stage subcategories
+
+head(Project_data6)
+```
+
+## running the multinominal regression
+
+```{r}
+# running the model
+model_multi <- multinom(Project_data6$Combined_Summary_Stage_new ~ Project_data6$Race_Ethnicity, data=Project_data6)
+summary(model_multi)
+results <- tidy(model_multi, exponentiate = TRUE, conf.int = TRUE)
+write.csv(results, "C:/Users/samia/OneDrive/Desktop/ADA Project/multinom_results.csv")
+```
+ 
+
+.
+
+##  Just for exploring;Adjusting for age: The reason is: the effect of Age on the detection and management of Breast cance.
+
+```{r}
+model_Adj <- multinom(Combined_Summary_Stage_new ~ Race_Ethnicity + Age_group, data=Project_data6)
+summary(model_Adj)
+
+## extract coefficients from the model, exponentiate and CI
+tidy(model_Adj, conf.int=TRUE, exponentiate = TRUE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
